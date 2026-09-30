@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Havarie Dashboard – Komplett</title>
+<!-- jsPDF CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{--bg:#0f1113;--card:#15181a;--muted:#9aa0a6;--accent:#007bff;--danger:#ff4d4d}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:#eaeaea}
+  /* Vergrößerte, oben fixierte Uhr: */
+  header{padding:64px 20px 18px;border-bottom:1px solid #121314;background:linear-gradient(180deg,#121315, #0f1113);display:flex;align-items:center;justify-content:space-between}
+  #clock{position:fixed;top:10px;left:50%;transform:translateX(-50%);font-size:48px;font-weight:700;z-index:1000;background:rgba(0,0,0,0.12);padding:6px 12px;border-radius:8px}
+  .container{display:grid;grid-template-columns:1fr 380px;gap:20px;padding:20px;max-width:1100px;margin:0 auto}
+  .card{background:var(--card);padding:16px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.6)}
+  h1,h2{margin:0 0 12px 0}
+  .person{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:14px;
+    border-radius:10px;
+    background:#1b1f21;
+    margin-bottom:8px;
+    cursor:pointer;
+    border:1px solid transparent;
+    text-transform:uppercase;
+    font-weight:700;
+    gap:6px;
+  }
+  .person:hover{border-color:#2a2f33}
+  .person.done{background:#14441f;color:#dff7dc}
+  .zeit{opacity:0.85;font-size:14px;color:var(--muted)}
+  .actions{display:flex;gap:8px;margin-top:10px}
+  button{border:0;padding:10px 14px;border-radius:8px;cursor:pointer}
+  .btn-danger{background:var(--danger);color:white}
+  .btn-primary{background:var(--accent);color:white}
+  .notes-row{display:flex;gap:8px;margin-bottom:12px}
+  input[type=text]{padding:10px;border-radius:8px;border:1px solid #2a2f33;background:#0f1315;color:white;width:100%}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:10px;text-align:left;border-bottom:1px solid #111}
+  #meldebericht{display:none;text-align:center;margin-top:16px}
+  #meldebericht .icon{font-size:56px;color:var(--danger);animation:blink 1s infinite}
+  #meldebericht .label{font-size:26px;color:var(--danger);font-weight:700;margin-top:8px}
+  @keyframes blink{50%{opacity:0}}
+  footer{padding:12px 20px;text-align:center;color:var(--muted);font-size:13px}
+  @media(max-width:900px){.container{grid-template-columns:1fr}.right{order:2}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 style="font-size:18px;margin:0">Havarie Dashboard</h1>
+    <div style="color:var(--muted);font-size:13px">Schnellnotruf & Dokumentation</div>
+  </div>
+  <div id="clock">--:--:--</div>
+</header>
+
+<div class="container">
+  <div class="left">
+    <div class="card">
+      <h2>Notfallliste</h2>
+      <div id="liste" aria-live="polite"></div>
+      <div class="actions">
+        <button class="btn-danger" id="fertigBtn">Fertig ✔️</button>
+        <button class="btn-primary" id="resetBtn">Reset</button>
+      </div>
+      <div id="meldebericht">
+        <div class="icon">⚠️</div>
+        <div class="label">Meldebericht schreiben</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Notizen</h2>
+      <div class="notes-row">
+        <input id="noteInput" type="text" placeholder="Neue Notiz eingeben...">
+        <button class="btn-primary" id="addNoteBtn">Hinzufügen</button>
+      </div>
+      <table id="noteTable">
+        <thead><tr><th>Notiz</th><th style="width:150px">Zeit</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="btn-primary" id="pdfBtn">📄 PDF speichern</button>
+      <button id="exportJsonBtn" style="background:#2b2b2b;color:white">Export JSON</button>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="card">
+      <h2>Eingabemaske</h2>
+      <label style="font-size:13px;color:var(--muted)">Schichtleiter</label>
+      <input id="schichtleiter" type="text" placeholder="Name Schichtleiter">
+      <div style="margin-top:12px;color:var(--muted);font-size:13px">Benachrichtigte Stellen</div>
+      <div id="summary" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<footer>Dashboard lokal – Daten werden im Browser gespeichert</footer>
+
+<script>
+// --- Initialisierung ---
+const personen = ["Integrierte Leitstelle","WSP","Außenbezirk","Warte Main","Schifffahrtsbüro","Revierzentrale"];
+const listeEl = document.getElementById('liste');
+const noteTableBody = document.querySelector('#noteTable tbody');
+const schichtInput = document.getElementById('schichtleiter');
+const meldeberichtEl = document.getElementById('meldebericht');
+const fertigBtn = document.getElementById('fertigBtn');
+const resetBtn = document.getElementById('resetBtn');
+const pdfBtn = document.getElementById('pdfBtn');
+const addNoteBtn = document.getElementById('addNoteBtn');
+const noteInput = document.getElementById('noteInput');
+const exportJsonBtn = document.getElementById('exportJsonBtn');
+
+let state = {personen: {}, notes: []};
+
+// Load from localStorage
+function loadState(){
+  try{
+    const raw = localStorage.getItem('havarie_state');
+    if(raw) state = JSON.parse(raw);
+  }catch(e){console.warn('load failed',e)}
+}
+function saveState(){
+  localStorage.setItem('havarie_state', JSON.stringify(state));
+}
+
+// Live clock
+function updateClock(){
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+setInterval(updateClock,1000); updateClock();
+
+// Render Personen
+function renderPersons(){
+  listeEl.innerHTML = '';
+  personen.forEach(name=>{
+    const div = document.createElement('div');
+    div.className='person';
+    const time = state.personen[name] || '';
+    if(time) div.classList.add('done');
+    div.innerHTML = `<div>${name}</div><div class='zeit'>${time}</div>`;
+    div.addEventListener('click', ()=>{
+      if(state.personen[name]) return; // kein Update wenn schon gesetzt
+      const now = new Date().toLocaleTimeString();
+      state.personen[name]=now;
+      saveState();
+      renderPersons();
+      renderSummary();
+    });
+    listeEl.appendChild(div);
+  });
+}
+
+// Notes
+function renderNotes(){
+  noteTableBody.innerHTML='';
+  state.notes.forEach((n,idx)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${escapeHtml(n.text)}</td><td>${n.time}</td>`;
+    noteTableBody.appendChild(tr);
+  });
+}
+
+function addNote(){
+  const text = noteInput.value.trim(); if(!text) return;
+  const time = new Date().toLocaleTimeString();
+  state.notes.push({text,time});
+  noteInput.value='';
+  saveState(); renderNotes();
+}
+addNoteBtn.addEventListener('click', addNote);
+noteInput.addEventListener('keydown', e=>{ if(e.key==='Enter') addNote(); });
+
+// Summary
+function renderSummary(){
+  const el = document.getElementById('summary');
+  const items = Object.keys(state.personen).map(k=>k+': '+state.personen[k]);
+  el.textContent = items.length? items.join('\n') : 'Keine Benachrichtigungen';
+}
+
+// Fertig -> Schichtleiter fragen -> Anzeige Meldebericht
+fertigBtn.addEventListener('click', ()=>{
+  const name = schichtInput.value.trim() || prompt('Schichtleiter: Bitte Name eingeben');
+  if(!name) return; schichtInput.value = name; saveState();
+  meldeberichtEl.style.display='block';
+});
+
+// Reset
+resetBtn.addEventListener('click', ()=>{
+  if(!confirm('Alle Daten löschen?')) return;
+  state = {personen:{},notes:[]}; saveState(); renderPersons(); renderNotes(); renderSummary(); meldeberichtEl.style.display='none'; schichtInput.value='';
+});
+
+// Export JSON
+exportJsonBtn.addEventListener('click', ()=>{
+  const dataStr = JSON.stringify(state,null,2);
+  const blob = new Blob([dataStr],{type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='havarie_export.json'; a.click();
+});
+
+// PDF (jsPDF)
+async function makePDF(){
+  // ensure jsPDF loaded
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'pt',format:'a4'});
+  let y=40;
+  doc.setFontSize(18); doc.text('Havarie-Dokumentation',40,y); y+=30;
+  doc.setFontSize(12);
+  doc.text('Erstellt: ' + new Date().toLocaleString(),40,y); y+=20;
+  doc.text('Schichtleiter: ' + (schichtInput.value||'-'),40,y); y+=24;
+
+  doc.setFontSize(13); doc.text('Benachrichtigte Stellen:',40,y); y+=18;
+  Object.keys(state.personen).forEach(k=>{
+    doc.text('- ' + k + '  ' + state.personen[k], 60, y); y+=16; if(y>740){doc.addPage(); y=40}
+  });
+  y+=8;
+  doc.text('Notizen:',40,y); y+=18;
+  state.notes.forEach(n=>{
+    const lines = doc.splitTextToSize('- '+n.text+' ('+n.time+')', 480);
+    doc.text(lines,40,y); y += lines.length*14; if(y>740){doc.addPage(); y=40}
+  });
+
+  doc.save('Havarie_Dokumentation.pdf');
+}
+
+pdfBtn.addEventListener('click', makePDF);
+
+// Utilities
+function escapeHtml(str){ return str.replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[s]); }
+
+// Load & initial render
+loadState(); renderPersons(); renderNotes(); renderSummary();
+
+</script>
+</body>
+</html>
